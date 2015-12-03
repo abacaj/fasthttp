@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="UTF-8">
+    <title>Fasthttp by abacaj</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="stylesheets/normalize.css" media="screen">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,700' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="stylesheets/github-light.css" media="screen">
+  </head>
+  <body>
+    <section class="page-header">
+      <h1 class="project-name">Fasthttp</h1>
+      <h2 class="project-tagline">Fast HTTP package for Go</h2>
+      <a href="https://github.com/abacaj/fasthttp" class="btn">View on GitHub</a>
+      <a href="https://github.com/abacaj/fasthttp/zipball/master" class="btn">Download .zip</a>
+      <a href="https://github.com/abacaj/fasthttp/tarball/master" class="btn">Download .tar.gz</a>
+    </section>
+
+    <section class="main-content">
+      <h1>
+<a id="fasthttp" class="anchor" href="#fasthttp" aria-hidden="true"><span class="octicon octicon-link"></span></a>fasthttp</h1>
+
+<p>Fast HTTP implementation for Go.</p>
+
+<p>Currently fasthttp is successfully used in a production serving up to 1M
+concurrent keep-alive connections doing 100K qps from a single server.</p>
+
+<p><a href="https://travis-ci.org/valyala/fasthttp"><img src="https://travis-ci.org/valyala/fasthttp.svg" alt="Build Status"></a></p>
+
+<p><a href="https://godoc.org/github.com/valyala/fasthttp">Documentation</a></p>
+
+<p><a href="https://godoc.org/github.com/valyala/fasthttp#pkg-examples">Examples</a></p>
+
+<p><a href="#switching-from-nethttp-to-fasthttp">Switching from net/http to fasthttp</a></p>
+
+<p><a href="#fasthttp-best-practicies">Fasthttp best practicies</a></p>
+
+<p><a href="#tricks-with-byte-buffers">Tricks with byte buffers</a></p>
+
+<p><a href="#faq">FAQ</a></p>
+
+<h1>
+<a id="http-server-performance-comparison-with-nethttp" class="anchor" href="#http-server-performance-comparison-with-nethttp" aria-hidden="true"><span class="octicon octicon-link"></span></a>HTTP server performance comparison with <a href="https://golang.org/pkg/net/http/">net/http</a>
+</h1>
+
+<p>In short, fasthttp server is up to 10 times faster than net/http. Below are benchmark results.</p>
+
+<p>GOMAXPROCS=1</p>
+
+<p>net/http:</p>
+
+<pre><code>$ GOMAXPROCS=1 go test -bench=NetHTTPServerGet -benchmem -benchtime=5s
+PASS
+BenchmarkNetHTTPServerGet1ReqPerConn                  300000         21236 ns/op        2404 B/op         30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn                  500000         14634 ns/op        2371 B/op         24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn                1000000          9447 ns/op        2101 B/op         19 allocs/op
+BenchmarkNetHTTPServerGet10KReqPerConn               1000000          7939 ns/op        2033 B/op         18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn10KClients        300000         30291 ns/op        4589 B/op         31 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn10KClients        500000         23199 ns/op        3581 B/op         25 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn10KClients       500000         13270 ns/op        2621 B/op         19 allocs/op
+BenchmarkNetHTTPServerGet100ReqPerConn10KClients      500000         11412 ns/op        2119 B/op         18 allocs/op
+</code></pre>
+
+<p>fasthttp:</p>
+
+<pre><code>$ GOMAXPROCS=1 go test -bench=kServerGet -benchmem -benchtime=5s
+PASS
+BenchmarkServerGet1ReqPerConn                3000000          2341 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet2ReqPerConn                5000000          1799 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet10ReqPerConn               5000000          1239 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet10KReqPerConn             10000000          1090 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet1ReqPerConn10KClients      3000000          2860 ns/op           4 B/op          0 allocs/op
+BenchmarkServerGet2ReqPerConn10KClients      3000000          1992 ns/op           1 B/op          0 allocs/op
+BenchmarkServerGet10ReqPerConn10KClients     5000000          1297 ns/op           1 B/op          0 allocs/op
+BenchmarkServerGet100ReqPerConn10KClients   10000000          1264 ns/op           9 B/op          0 allocs/op
+</code></pre>
+
+<p>GOMAXPROCS=4</p>
+
+<p>net/http:</p>
+
+<pre><code>$ GOMAXPROCS=4 go test -bench=NetHTTPServerGet -benchmem -benchtime=5s
+PASS
+BenchmarkNetHTTPServerGet1ReqPerConn-4               1000000          5545 ns/op        2433 B/op         30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn-4               2000000          4147 ns/op        2398 B/op         24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn-4              3000000          2628 ns/op        2118 B/op         19 allocs/op
+BenchmarkNetHTTPServerGet10KReqPerConn-4             3000000          2304 ns/op        2037 B/op         18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn10KClients-4     1000000          7327 ns/op        3561 B/op         30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn10KClients-4     1000000          5952 ns/op        3073 B/op         24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn10KClients-4    2000000          4345 ns/op        2530 B/op         19 allocs/op
+BenchmarkNetHTTPServerGet100ReqPerConn10KClients-4   2000000          3866 ns/op        2132 B/op         18 allocs/op
+</code></pre>
+
+<p>fasthttp:</p>
+
+<pre><code>$ GOMAXPROCS=4 go test -bench=kServerGet -benchmem -benchtime=5s
+PASS
+BenchmarkServerGet1ReqPerConn-4             10000000          1053 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet2ReqPerConn-4             10000000           685 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet10ReqPerConn-4            20000000           393 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet10KReqPerConn-4           20000000           338 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet1ReqPerConn10KClients-4   10000000          1033 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet2ReqPerConn10KClients-4   10000000           668 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet10ReqPerConn10KClients-4  20000000           393 ns/op           0 B/op          0 allocs/op
+BenchmarkServerGet100ReqPerConn10KClients-4 20000000           384 ns/op           4 B/op          0 allocs/op
+</code></pre>
+
+<h1>
+<a id="http-client-comparison-with-nethttp" class="anchor" href="#http-client-comparison-with-nethttp" aria-hidden="true"><span class="octicon octicon-link"></span></a>HTTP client comparison with net/http</h1>
+
+<p>In short, fasthttp client is up to 10 times faster than net/http. Below are benchmark results.</p>
+
+<p>GOMAXPROCS=1</p>
+
+<p>net/http:</p>
+
+<pre><code>$ GOMAXPROCS=1 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkNetHTTPClientDoFastServer    500000         17535 ns/op        2624 B/op         38 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd     200000         56593 ns/op        5012 B/op         59 allocs/op
+</code></pre>
+
+<p>fasthttp:</p>
+
+<pre><code>$ GOMAXPROCS=1 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkClientDoFastServer  5000000          1420 ns/op           0 B/op          0 allocs/op
+BenchmarkClientGetEndToEnd    500000         17912 ns/op           0 B/op          0 allocs/op
+</code></pre>
+
+<p>GOMAXPROCS=4</p>
+
+<p>net/http:</p>
+
+<pre><code>$ GOMAXPROCS=4 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkNetHTTPClientDoFastServer-4     1000000          5795 ns/op        2626 B/op         38 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd-4       500000         19304 ns/op        5953 B/op         62 allocs/op
+</code></pre>
+
+<p>fasthttp:</p>
+
+<pre><code>$ GOMAXPROCS=4 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkClientDoFastServer-4   20000000           443 ns/op           0 B/op          0 allocs/op
+BenchmarkClientGetEndToEnd-4     1000000          5954 ns/op           0 B/op          0 allocs/op
+</code></pre>
+
+<h1>
+<a id="switching-from-nethttp-to-fasthttp" class="anchor" href="#switching-from-nethttp-to-fasthttp" aria-hidden="true"><span class="octicon octicon-link"></span></a>Switching from net/http to fasthttp</h1>
+
+<p>Unfortunately, fasthttp doesn't provide API identical to net/http.
+See the <a href="#faq">FAQ</a> for details.</p>
+
+<p>Important points:</p>
+
+<ul>
+<li>Fasthttp works with <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler functions</a>
+instead of objects implementing <a href="https://golang.org/pkg/net/http/#Handler">Handler interface</a>.
+Fortunately, it is easy to pass bound struct methods to fasthttp:</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-k">type</span> <span class="pl-v">MyHandler</span> <span class="pl-k">struct</span> {
+    foobar <span class="pl-k">string</span>
+}
+
+<span class="pl-c">// request handler in net/http style, i.e. method bound to MyHandler struct.</span>
+<span class="pl-k">func</span> <span class="pl-en">(<span class="pl-v">h</span> *<span class="pl-v">MyHandler</span>) <span class="pl-en">HandleFastHTTP</span></span>(<span class="pl-v">ctx</span> *<span class="pl-v">fasthttp</span>.<span class="pl-v">RequestCtx</span>) {
+    <span class="pl-c">// notice that we may access MyHandler properties here - see h.foobar.</span>
+    fmt.<span class="pl-c1">Fprintf</span>(ctx, <span class="pl-s"><span class="pl-pds">"</span>Hello, world! Requested path is <span class="pl-c1">%q</span>. Foobar is <span class="pl-c1">%q</span><span class="pl-pds">"</span></span>,
+        ctx.<span class="pl-c1">Path</span>(), h.<span class="pl-smi">foobar</span>)
+}
+
+<span class="pl-c">// request handler in fasthttp style, i.e. just plain function.</span>
+<span class="pl-k">func</span> <span class="pl-en">fastHTTPHandler</span>(<span class="pl-v">ctx</span> *<span class="pl-v">fasthttp</span>.<span class="pl-v">RequestCtx</span>) {
+    fmt.<span class="pl-c1">Fprintf</span>(ctx, <span class="pl-s"><span class="pl-pds">"</span>Hi there! RequestURI is <span class="pl-c1">%q</span><span class="pl-pds">"</span></span>, ctx.<span class="pl-c1">RequestURI</span>())
+}
+
+<span class="pl-c">// pass bound struct method to fasthttp</span>
+<span class="pl-smi">myHandler</span> <span class="pl-k">:=</span> &amp;MyHandler{
+    foobar: <span class="pl-s"><span class="pl-pds">"</span>foobar<span class="pl-pds">"</span></span>,
+}
+fasthttp.<span class="pl-c1">ListenAndServe</span>(<span class="pl-s"><span class="pl-pds">"</span>:8080<span class="pl-pds">"</span></span>, myHandler.<span class="pl-smi">HandleFastHTTP</span>)
+
+<span class="pl-c">// pass plain function to fasthttp</span>
+fasthttp.<span class="pl-c1">ListenAndServe</span>(<span class="pl-s"><span class="pl-pds">"</span>:8081<span class="pl-pds">"</span></span>, fastHTTPHandler)</pre></div>
+
+<ul>
+<li>The <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler</a>
+accepts only one argument - <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx">RequestCtx</a>.
+It contains all the functionality required for http request processing
+and response writing. Below is an example of a simple request handler conversion
+from net/http to fasthttp.</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-c">// net/http request handler</span>
+<span class="pl-smi">requestHandler</span> <span class="pl-k">:=</span> <span class="pl-c1">func</span>(w http.<span class="pl-smi">ResponseWriter</span>, r *http.<span class="pl-smi">Request</span>) {
+    <span class="pl-k">switch</span> r.<span class="pl-smi">URL</span>.<span class="pl-smi">Path</span> {
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/foo<span class="pl-pds">"</span></span>:
+        <span class="pl-c1">fooHandler</span>(w, r)
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/bar<span class="pl-pds">"</span></span>:
+        <span class="pl-c1">barHandler</span>(w, r)
+    <span class="pl-k">default</span>:
+        http.<span class="pl-c1">Error</span>(w, <span class="pl-s"><span class="pl-pds">"</span>Unsupported path<span class="pl-pds">"</span></span>, http.<span class="pl-smi">StatusNotFound</span>)
+    }
+}</pre></div>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-c">// the corresponding fasthttp request handler</span>
+<span class="pl-smi">requestHandler</span> <span class="pl-k">:=</span> <span class="pl-c1">func</span>(ctx *fasthttp.<span class="pl-smi">RequestCtx</span>) {
+    <span class="pl-k">switch</span> <span class="pl-k">string</span>(ctx.<span class="pl-c1">Path</span>()) {
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/foo<span class="pl-pds">"</span></span>:
+        <span class="pl-c1">fooHandler</span>(ctx)
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/bar<span class="pl-pds">"</span></span>:
+        <span class="pl-c1">barHandler</span>(ctx)
+    <span class="pl-k">default</span>:
+        ctx.<span class="pl-c1">Error</span>(<span class="pl-s"><span class="pl-pds">"</span>Unsupported path<span class="pl-pds">"</span></span>, fasthttp.<span class="pl-smi">StatusNotFound</span>)
+    }
+}</pre></div>
+
+<ul>
+<li>Fasthttp allows setting response headers and writing response body
+in arbitray order. There is no 'headers first, then body' restriction
+like in net/http. The following code is valid for fasthttp:</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-smi">requestHandler</span> <span class="pl-k">:=</span> <span class="pl-c1">func</span>(ctx *fasthttp.<span class="pl-smi">RequestCtx</span>) {
+    <span class="pl-c">// set some headers and status code first</span>
+    ctx.<span class="pl-c1">SetContentType</span>(<span class="pl-s"><span class="pl-pds">"</span>foo/bar<span class="pl-pds">"</span></span>)
+    ctx.<span class="pl-c1">SetStatusCode</span>(fasthttp.<span class="pl-smi">StatusOK</span>)
+
+    <span class="pl-c">// then write the first part of body</span>
+    fmt.<span class="pl-c1">Fprintf</span>(ctx, <span class="pl-s"><span class="pl-pds">"</span>this is the first part of body<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>)
+
+    <span class="pl-c">// then set more headers</span>
+    ctx.<span class="pl-smi">Response</span>.<span class="pl-smi">Header</span>.<span class="pl-c1">Set</span>(<span class="pl-s"><span class="pl-pds">"</span>Foo-Bar<span class="pl-pds">"</span></span>, <span class="pl-s"><span class="pl-pds">"</span>baz<span class="pl-pds">"</span></span>)
+
+    <span class="pl-c">// then write more body</span>
+    fmt.<span class="pl-c1">Fprintf</span>(ctx, <span class="pl-s"><span class="pl-pds">"</span>this is the second part of body<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>)
+
+    <span class="pl-c">// then override already written body</span>
+    ctx.<span class="pl-c1">SetBody</span>([]<span class="pl-k">byte</span>(<span class="pl-s"><span class="pl-pds">"</span>this is completely new body contents<span class="pl-pds">"</span></span>))
+
+    <span class="pl-c">// then update status code</span>
+    ctx.<span class="pl-c1">SetStatusCode</span>(fasthttp.<span class="pl-smi">StatusNotFound</span>)
+
+    <span class="pl-c">// basically, anything may be updated many times before</span>
+    <span class="pl-c">// returning from RequestHandler.</span>
+    <span class="pl-c">//</span>
+    <span class="pl-c">// Unlike net/http fasthttp doesn't put response to the wire until</span>
+    <span class="pl-c">// returning from RequestHandler.</span>
+}</pre></div>
+
+<ul>
+<li>Fasthttp doesn't provide <a href="https://golang.org/pkg/net/http/#ServeMux">ServeMux</a>,
+since I believe third-party request routers like <a href="https://github.com/julienschmidt/httprouter">httprouter</a>
+must be used instead. Net/http code with simple ServeMux is trivially converted
+to fasthttp code:</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-c">// net/http code</span>
+
+<span class="pl-smi">m</span> <span class="pl-k">:=</span> &amp;http.<span class="pl-smi">ServeMux</span>{}
+m.<span class="pl-c1">HandleFunc</span>(<span class="pl-s"><span class="pl-pds">"</span>/foo<span class="pl-pds">"</span></span>, fooHandlerFunc)
+m.<span class="pl-c1">HandleFunc</span>(<span class="pl-s"><span class="pl-pds">"</span>/bar<span class="pl-pds">"</span></span>, barHandlerFunc)
+m.<span class="pl-c1">Handle</span>(<span class="pl-s"><span class="pl-pds">"</span>/baz<span class="pl-pds">"</span></span>, bazHandler)
+
+http.<span class="pl-c1">ListenAndServe</span>(<span class="pl-s"><span class="pl-pds">"</span>:80<span class="pl-pds">"</span></span>, m)</pre></div>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-c">// the corresponding fasthttp code</span>
+<span class="pl-smi">m</span> <span class="pl-k">:=</span> <span class="pl-c1">func</span>(ctx *fasthttp.<span class="pl-smi">RequestCtx</span>) {
+    <span class="pl-k">switch</span> <span class="pl-k">string</span>(ctx.<span class="pl-c1">Path</span>()) {
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/foo<span class="pl-pds">"</span></span>:
+        <span class="pl-c1">fooHandlerFunc</span>(ctx)
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/bar<span class="pl-pds">"</span></span>:
+        <span class="pl-c1">barHandlerFunc</span>(ctx)
+    <span class="pl-k">case</span> <span class="pl-s"><span class="pl-pds">"</span>/baz<span class="pl-pds">"</span></span>:
+        bazHandler.<span class="pl-c1">HandlerFunc</span>(ctx)
+    <span class="pl-k">default</span>:
+        ctx.<span class="pl-c1">Error</span>(<span class="pl-s"><span class="pl-pds">"</span>not found<span class="pl-pds">"</span></span>, fasthttp.<span class="pl-smi">StatusNotFound</span>)
+    }
+}
+
+fastttp.<span class="pl-c1">ListenAndServe</span>(<span class="pl-s"><span class="pl-pds">"</span>:80<span class="pl-pds">"</span></span>, m)</pre></div>
+
+<ul>
+<li>
+<p>net/http -&gt; fasthttp conversion table:</p>
+
+<ul>
+<li>All the pseudocode below assumes w, r and ctx have these types:</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre>  <span class="pl-c1">var</span> (
+      w http.<span class="pl-smi">ResponseWriter</span>
+      r *http.<span class="pl-smi">Request</span>
+      ctx *fasthttp.<span class="pl-smi">RequestCtx</span>
+  )</pre></div>
+
+<ul>
+<li>r.Body -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody">ctx.PostBody()</a>
+</li>
+<li>r.URL.Path -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Path">ctx.Path()</a>
+</li>
+<li>r.URL -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.URI">ctx.URI()</a>
+</li>
+<li>r.Method -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Method">ctx.Method()</a>
+</li>
+<li>r.Header -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHeader">ctx.Request.Header</a>
+</li>
+<li>r.Header.Get() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHeader.Peek">ctx.Request.Header.Peek()</a>
+</li>
+<li>r.Host -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Host">ctx.Host()</a>
+</li>
+<li>r.Form -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.QueryArgs">ctx.QueryArgs()</a> +
+<a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostArgs">ctx.PostArgs()</a>
+</li>
+<li>r.PostForm -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostArgs">ctx.PostArgs()</a>
+</li>
+<li>r.FormValue() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#Args.Peek">ctx.QueryArgs().Peek()</a>
+</li>
+<li>r.MultipartForm -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.MultipartForm">ctx.MultipartForm()</a>
+</li>
+<li>r.RemoteAddr -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.RemoteAddr">ctx.RemoteAddr()</a>
+</li>
+<li>r.RequestURI -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.RequestURI">ctx.RequestURI()</a>
+</li>
+<li>r.TLS -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.IsTLS">ctx.IsTLS()</a>
+</li>
+<li>r.Cookie() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHeader.Cookie">ctx.Request.Header.Cookie()</a>
+</li>
+<li>r.Referer() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Referer">ctx.Referer()</a>
+</li>
+<li>r.UserAgent() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHeader.UserAgent">ctx.Request.Header.UserAgent()</a>
+</li>
+<li>w.Header() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#ResponseHeader">ctx.Response.Header</a>
+</li>
+<li>w.Header().Set() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#ResponseHeader.Set">ctx.Response.Header.Set()</a>
+</li>
+<li>w.Header().Set("Content-Type") -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetContentType">ctx.SetContentType()</a>
+</li>
+<li>w.Header().Set("Set-Cookie") -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#ResponseHeader.SetCookie">ctx.Response.Header.SetCookie()</a>
+</li>
+<li>w.Write() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Write">ctx.Write()</a>,
+<a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBody">ctx.SetBody()</a>,
+<a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBodyStream">ctx.SetBodyStream()</a>
+</li>
+<li>w.WriteHeader() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetStatusCode">ctx.SetStatusCode()</a>
+</li>
+<li>w.(http.Hijacker).Hijack() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack">ctx.Hijack()</a>
+</li>
+<li>http.Error() -&gt; <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Error">ctx.Error()</a>
+</li>
+</ul>
+</li>
+<li>
+<p><em>VERY IMPORTANT!</em> Fasthttp disallows holding references
+to <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx">RequestCtx</a> or to its'
+members after returning from <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler</a>.
+Otherwise <a href="http://blog.golang.org/race-detector">data races</a> are unevitable.
+Carefully inspect all the net/http request handlers converted to fasthttp whether
+they retain references to RequestCtx or to its' members after returning.
+RequestCtx provides the following <em>band aids</em> for this case:</p>
+
+<ul>
+<li>Wrap RequestHandler into <a href="https://godoc.org/github.com/valyala/fasthttp#TimeoutHandler">TimeoutHandler</a>.</li>
+<li>Call <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError">TimeoutError</a>
+before returning from RequestHandler if there are references to RequestCtx or to its' members.
+See <a href="https://godoc.org/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError">the example</a>
+for more details.</li>
+</ul>
+</li>
+</ul>
+
+<p>Use brilliant tool - <a href="http://blog.golang.org/race-detector">race detector</a> -
+for detecting and eliminating data races in your program. If you detected
+data race related to fasthttp in your program, then there is high probability
+you forgot calling <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError">TimeoutError</a>
+before returning from <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler</a>.</p>
+
+<ul>
+<li>Blind switching from net/http to fasthttp won't give you performance boost.
+While fasthttp is optimized for speed, its' performance may be easily saturated
+by slow <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler</a>.
+So <a href="http://blog.golang.org/profiling-go-programs">profile</a> and optimize your
+code after switching to fasthttp.</li>
+</ul>
+
+<h1>
+<a id="performance-optimization-tips-for-multi-core-systems" class="anchor" href="#performance-optimization-tips-for-multi-core-systems" aria-hidden="true"><span class="octicon octicon-link"></span></a>Performance optimization tips for multi-core systems</h1>
+
+<ul>
+<li>Use <a href="https://godoc.org/github.com/valyala/fasthttp/reuseport">reuseport</a> listener.</li>
+<li>Run a separate server instance per CPU core with GOMAXPROCS=1.</li>
+<li>Pin each server instance to a separate CPU core using <a href="http://linux.die.net/man/1/taskset">taskset</a>.</li>
+<li>Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
+See <a href="https://blog.cloudflare.com/how-to-achieve-low-latency/">this article</a> for details.</li>
+</ul>
+
+<h1>
+<a id="fasthttp-best-practicies" class="anchor" href="#fasthttp-best-practicies" aria-hidden="true"><span class="octicon octicon-link"></span></a>Fasthttp best practicies</h1>
+
+<ul>
+<li>Do not allocate objects and <code>[]byte</code> buffers - just reuse them as much
+as possible. Fasthttp API design encourages this.</li>
+<li>
+<a href="https://golang.org/pkg/sync/#Pool">sync.Pool</a> is your best friend.</li>
+<li>
+<a href="http://blog.golang.org/profiling-go-programs">Profile your program</a>
+in production.
+<code>go tool pprof --alloc_objects your-program mem.pprof</code> usually gives better
+insights for optimization opportunities than <code>go tool pprof your-program cpu.pprof</code>.</li>
+<li>Write <a href="https://golang.org/pkg/testing/">tests and benchmarks</a> for hot paths.</li>
+<li>Avoid conversion between <code>[]byte</code> and <code>string</code>, since this may result in memory
+allocation+copy. Fasthttp API provides functions for both <code>[]byte</code> and <code>string</code> -
+use these functions instead of converting manually between <code>[]byte</code> and <code>string</code>.</li>
+<li>Verify your tests and production code under
+<a href="https://golang.org/doc/articles/race_detector.html">race detector</a> on a regular basis.</li>
+</ul>
+
+<h1>
+<a id="tricks-with-byte-buffers" class="anchor" href="#tricks-with-byte-buffers" aria-hidden="true"><span class="octicon octicon-link"></span></a>Tricks with <code>[]byte</code> buffers</h1>
+
+<p>The following tricks are used by fasthttp. Use them in your code too.</p>
+
+<ul>
+<li>Standard Go functions accept nil buffers</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-k">var</span> (
+    <span class="pl-c">// both buffers are uninitialized</span>
+    dst []<span class="pl-k">byte</span>
+    src []<span class="pl-k">byte</span>
+)
+dst = <span class="pl-c1">append</span>(dst, src...)  <span class="pl-c">// this is legal code</span>
+<span class="pl-c1">copy</span>(dst, src)  <span class="pl-c">// this is legal code</span>
+(<span class="pl-k">string</span>(src) == <span class="pl-s"><span class="pl-pds">"</span><span class="pl-pds">"</span></span>)  <span class="pl-c">// is true</span>
+(<span class="pl-c1">len</span>(src) == <span class="pl-c1">0</span>)  <span class="pl-c">// is true</span></pre></div>
+
+<p>So throw away nil checks for <code>[]byte</code> buffers from you code. For example,</p>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-smi">srcLen</span> <span class="pl-k">:=</span> <span class="pl-c1">0</span>
+<span class="pl-k">if</span> src != <span class="pl-c1">nil</span> {
+    srcLen = <span class="pl-c1">len</span>(src)
+}</pre></div>
+
+<p>becomes</p>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-smi">srcLen</span> <span class="pl-k">:=</span> <span class="pl-c1">len</span>(src)</pre></div>
+
+<ul>
+<li>String may be appended to <code>[]byte</code> buffer with <code>append</code>
+</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre>dst = <span class="pl-c1">append</span>(dst, <span class="pl-s"><span class="pl-pds">"</span>foobar<span class="pl-pds">"</span></span>...)</pre></div>
+
+<ul>
+<li>All fasthttp functions accept nil <code>[]byte</code> buffer</li>
+</ul>
+
+<div class="highlight highlight-source-go"><pre><span class="pl-smi">statusCode</span>, <span class="pl-smi">body</span>, <span class="pl-smi">err</span> <span class="pl-k">:=</span> fasthttp.<span class="pl-c1">Get</span>(<span class="pl-c1">nil</span>, <span class="pl-s"><span class="pl-pds">"</span>http://google.com/<span class="pl-pds">"</span></span>)
+<span class="pl-smi">uintBuf</span> <span class="pl-k">:=</span> fasthttp.<span class="pl-c1">AppendUint</span>(<span class="pl-c1">nil</span>, <span class="pl-c1">1234</span>)</pre></div>
+
+<h1>
+<a id="faq" class="anchor" href="#faq" aria-hidden="true"><span class="octicon octicon-link"></span></a>FAQ</h1>
+
+<ul>
+<li>
+<p><em>Why creating yet another http package instead of optimizing net/http?</em></p>
+
+<p>Because net/http API limits many optimization opportunities.
+For example:</p>
+
+<ul>
+<li>net/http Request object lifetime isn't limited by request handler execution
+time. So the server must create new request object per each request instead
+of reusing existing objects like fasthttp do.</li>
+<li>net/http headers are stored in a <code>map[string][]string</code>. So the server
+must parse all the headers, convert them from <code>[]byte</code> to <code>string</code> and put
+them into the map before calling user-provided request handler.
+This all requires unnesessary memory allocations avoided by fasthttp.</li>
+<li>net/http client API requires creating new response object per each request.</li>
+</ul>
+</li>
+<li>
+<p><em>Why fasthttp API is incompatible with net/http?</em></p>
+
+<p>Because net/http API limits many optimization opportunities. See the answer
+above for more details. Also certain net/http API parts are suboptimal
+for use:</p>
+
+<ul>
+<li>Compare <a href="https://golang.org/pkg/net/http/#Hijacker">net/http connection hijacking</a>
+to <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack">fasthttp connection hijacking</a>.</li>
+<li>Compare <a href="https://golang.org/pkg/net/http/#Request">net/http Request.Body reading</a>
+to <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody">fasthttp request body reading</a>.</li>
+</ul>
+</li>
+<li>
+<p><em>Why fasthttp doesn't support HTTP/2.0 and WebSockets?</em></p>
+
+<p>There are <a href="TODO">plans</a> for adding HTTP/2.0 and WebSockets support
+in the future.
+In the mean time, third parties may use <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack">RequestCtx.Hijack</a>
+for implementing these goodies.</p>
+</li>
+<li>
+<p><em>Are there known net/http advantages comparing to fasthttp?</em></p>
+
+<p>Yes:</p>
+
+<ul>
+<li>net/http supports <a href="https://http2.golang.org/">HTTP/2.0 starting from go1.6</a>.</li>
+<li>net/http API is stable, while fasthttp API constantly evolves.</li>
+<li>net/http handles more HTTP corner cases.</li>
+<li>net/http should contain less bugs, since it is used and tested by much
+wider audience.</li>
+<li>Many existing web frameworks and request routers are built on top
+of net/http.</li>
+<li>net/http works on Go older than 1.5.</li>
+</ul>
+</li>
+<li>
+<p><em>Which GO versions are supported by fasthttp?</em></p>
+
+<p>Go1.5+. Older versions won't be supported, since their standard package
+<a href="https://github.com/valyala/fasthttp/issues/5">miss useful functions</a>.</p>
+</li>
+<li>
+<p><em>Please provide real benchmark data and sever information</em></p>
+
+<p>See <a href="https://github.com/valyala/fasthttp/issues/4">this issue</a>.</p>
+</li>
+<li>
+<p><em>Are there plans to add request routing to fasthttp?</em></p>
+
+<p>There are no plans to add request routing into fasthttp. I believe request
+routing must be implemented in a separate package(s) like
+<a href="https://github.com/julienschmidt/httprouter">httprouter</a>.
+See <a href="https://github.com/valyala/fasthttp/issues/8">this issue</a> for more info.</p>
+</li>
+<li>
+<p><em>I detected data race in fasthttp!</em></p>
+
+<p>Cool! <a href="https://github.com/valyala/fasthttp/issues/new">File a bug</a>. But before
+doing this check the following in your code:</p>
+
+<ul>
+<li>Make sure there are no references to <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx">RequestCtx</a>
+or to its' members after returning from <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler</a>.</li>
+<li>Make sure you call <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError">TimeoutError</a>
+before returning from <a href="https://godoc.org/github.com/valyala/fasthttp#RequestHandler">RequestHandler</a>
+if there are references to <a href="https://godoc.org/github.com/valyala/fasthttp#RequestCtx">RequestCtx</a>
+or to its' members, which may be accessed by other goroutines.</li>
+</ul>
+</li>
+</ul>
+
+      <footer class="site-footer">
+        <span class="site-footer-owner"><a href="https://github.com/abacaj/fasthttp">Fasthttp</a> is maintained by <a href="https://github.com/abacaj">abacaj</a>.</span>
+
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the <a href="https://github.com/jasonlong/cayman-theme">Cayman theme</a> by <a href="https://twitter.com/jasonlong">Jason Long</a>.</span>
+      </footer>
+
+    </section>
+
+  
+  </body>
+</html>
